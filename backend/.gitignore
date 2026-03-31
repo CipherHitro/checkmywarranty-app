@@ -13,7 +13,7 @@ pids
 
 # Dependency directories
 node_modules/
-
+uploads/
 # Environment variables
 .env
 .env.*
