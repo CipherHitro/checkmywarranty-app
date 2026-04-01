@@ -9,6 +9,7 @@ export function setUser(user) {
       id: user.id,
       name: user.fullname,
       email: user.email,
+      uuid : user.uuid
     },
     secret,
   );

@@ -1,4 +1,9 @@
 import { pool } from "../connection.js";
+import { uploadToS3 } from "../utils/s3.js";
+import { configDotenv } from "dotenv";
+
+configDotenv();
+const isProduction = process.env.MODE === "production";
 
 async function handleUpload(req, res) {
   try {
@@ -7,13 +12,23 @@ async function handleUpload(req, res) {
     }
 
     const userId = req.user.id;
-    const fileUrl = `/uploads/${req.file.filename}`;
+    
+    let fileUrl;
+    if (isProduction) {
+      // In production, req.file.buffer is available because of multer.memoryStorage() in routes
+      fileUrl = await uploadToS3(req.file, "documents");
+    } else {
+      fileUrl = `/uploads/${req.file.filename}`;
+    }
+
     const originalFilename = req.file.originalname;
+    const fileSize = req.file.size;
+    const fileType = req.file.mimetype;
     const expiryDate = req.body.expiry_date || null;
 
     const result = await pool.query(
-      "INSERT INTO documents (user_id, file_url, original_filename, expiry_date) VALUES ($1, $2, $3, $4) RETURNING *",
-      [userId, fileUrl, originalFilename, expiryDate]
+      "INSERT INTO documents (user_id, file_url, original_filename, file_size, file_type, expiry_date) VALUES ($1, $2, $3, $4, $5, $6) RETURNING uuid, file_url, original_filename, file_size, file_type, expiry_date, created_at",
+      [userId, fileUrl, originalFilename, fileSize, fileType, expiryDate]
     );
 
     return res.status(201).json({
@@ -30,7 +45,7 @@ async function handleGetDocuments(req, res) {
   try {
     const userId = req.user.id;
     const result = await pool.query(
-      "SELECT * FROM documents WHERE user_id = $1 ORDER BY created_at DESC",
+      "SELECT uuid, file_url, original_filename, expiry_date, created_at FROM documents WHERE user_id = $1 AND is_archived = false ORDER BY created_at DESC",
       [userId]
     );
     return res.json({ documents: result.rows });
@@ -43,11 +58,11 @@ async function handleGetDocuments(req, res) {
 async function handleDeleteDocument(req, res) {
   try {
     const userId = req.user.id;
-    const docId = req.params.id;
+    const docUuid = req.params.uuid;
 
     const result = await pool.query(
-      "DELETE FROM documents WHERE id = $1 AND user_id = $2 RETURNING *",
-      [docId, userId]
+      "UPDATE documents SET is_archived = true WHERE uuid = $1 AND user_id = $2 AND is_archived = false RETURNING uuid",
+      [docUuid, userId]
     );
 
     if (result.rows.length === 0) {

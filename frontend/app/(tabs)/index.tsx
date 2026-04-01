@@ -22,8 +22,7 @@ import { getToken } from '@/utils/auth';
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 
 interface Document {
-  id: number;
-  user_id: number;
+  uuid: string;
   file_url: string;
   original_filename: string;
   expiry_date: string | null;
@@ -48,6 +47,8 @@ const Documents = () => {
       const data = await response.json();
       if (response.ok) {
         setDocuments(data.documents);
+      } else {
+        setDocuments([]);
       }
     } catch (error) {
       console.error('Fetch documents error:', error);
@@ -170,7 +171,7 @@ const Documents = () => {
     ]);
   };
 
-  const deleteDocument = async (docId: number) => {
+  const deleteDocument = async (docUuid: string) => {
     Alert.alert('Delete', 'Are you sure you want to delete this document?', [
       { text: 'Cancel', style: 'cancel' },
       {
@@ -180,14 +181,14 @@ const Documents = () => {
           try {
             const token = await getToken();
             const response = await fetch(
-              `${BACKEND_URL}/manageData/documents/${docId}`,
+              `${BACKEND_URL}/manageData/documents/${docUuid}`,
               {
                 method: 'DELETE',
                 headers: { Authorization: `Bearer ${token}` },
               }
             );
             if (response.ok) {
-              setDocuments((prev) => prev.filter((d) => d.id !== docId));
+              setDocuments((prev) => prev.filter((d) => d.uuid !== docUuid));
             } else {
               Alert.alert('Error', 'Could not delete document');
             }
@@ -220,7 +221,7 @@ const Documents = () => {
       <TouchableOpacity
         style={styles.documentItem}
         activeOpacity={0.7}
-        onLongPress={() => deleteDocument(item.id)}
+        onLongPress={() => deleteDocument(item.uuid)}
       >
         {isImage ? (
           <Image
@@ -247,7 +248,7 @@ const Documents = () => {
         </View>
         <TouchableOpacity
           style={styles.deleteButton}
-          onPress={() => deleteDocument(item.id)}
+          onPress={() => deleteDocument(item.uuid)}
         >
           <Ionicons name="trash-outline" size={20} color="#e74c3c" />
         </TouchableOpacity>
@@ -354,7 +355,7 @@ const Documents = () => {
             </Text>
             <FlatList
               data={documents}
-              keyExtractor={(item) => item.id.toString()}
+              keyExtractor={(item) => item.uuid.toString()}
               renderItem={renderDocumentItem}
               showsVerticalScrollIndicator={false}
               contentContainerStyle={styles.flatListContent}

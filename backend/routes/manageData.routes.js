@@ -2,17 +2,26 @@ import express from "express";
 import multer from "multer";
 import { authMiddleware } from "../middlewares/auth.middlewares.js";
 import { handleUpload, handleGetDocuments, handleDeleteDocument } from "../controller/manageData.controller.js";
+import { configDotenv } from "dotenv";
+configDotenv()
+const isProduction = process.env.MODE === 'production';
 
+let storage;
 // Multer storage config
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, "uploads/");
-  },
-  filename: (req, file, cb) => {
-    cb(null, `${Date.now()}-${file.originalname}`);
-  },
-});
-
+if(isProduction){
+  storage = multer.memoryStorage();
+}
+else {
+  storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+      cb(null, "uploads/");
+    },
+    filename: (req, file, cb) => {
+      cb(null, `${Date.now()}-${file.originalname}`);
+    },
+  });
+}
+  
 // File filter — allow images and PDFs
 const fileFilter = (req, file, cb) => {
   const allowedTypes = [
@@ -38,6 +47,6 @@ const router = express.Router();
 
 router.post("/upload", authMiddleware, upload.single("file"), handleUpload);
 router.get("/documents", authMiddleware, handleGetDocuments);
-router.delete("/documents/:id", authMiddleware, handleDeleteDocument);
+router.delete("/documents/:uuid", authMiddleware, handleDeleteDocument);
 
 export default router;
