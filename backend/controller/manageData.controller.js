@@ -1,5 +1,5 @@
 import { pool } from "../connection.js";
-import { uploadToS3 } from "../utils/s3.js";
+import { uploadToS3, generateSignedUrl } from "../utils/s3.js";
 import { configDotenv } from "dotenv";
 
 configDotenv();
@@ -21,7 +21,7 @@ async function handleUpload(req, res) {
       fileUrl = `/uploads/${req.file.filename}`;
     }
 
-    const originalFilename = req.file.originalname;
+    const originalFilename = decodeURIComponent(req.file.originalname).replace(/\\s+/g, '_');
     const fileSize = req.file.size;
     const fileType = req.file.mimetype;
     const expiryDate = req.body.expiry_date || null;
@@ -45,7 +45,7 @@ async function handleGetDocuments(req, res) {
   try {
     const userId = req.user.id;
     const result = await pool.query(
-      "SELECT uuid, file_url, original_filename, expiry_date, created_at FROM documents WHERE user_id = $1 AND is_archived = false ORDER BY created_at DESC",
+      "SELECT uuid, original_filename, expiry_date, created_at FROM documents WHERE user_id = $1 AND is_archived = false ORDER BY created_at DESC",
       [userId]
     );
     return res.json({ documents: result.rows });
@@ -76,4 +76,31 @@ async function handleDeleteDocument(req, res) {
   }
 }
 
-export { handleUpload, handleGetDocuments, handleDeleteDocument };
+async function handleGetDocumentUrl(req, res) {
+  try {
+    const userId = req.user.id;
+    const docUuid = req.params.uuid;
+
+    const result = await pool.query(
+      "SELECT file_url FROM documents WHERE uuid = $1 AND user_id = $2 AND is_archived = false",
+      [docUuid, userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: "Document not found" });
+    }
+
+    let fileUrl = result.rows[0].file_url;
+    
+    if (isProduction && fileUrl.startsWith("http")) {
+      fileUrl = await generateSignedUrl(fileUrl);
+    }
+
+    return res.json({ url: fileUrl });
+  } catch (error) {
+    console.error("Get document URL error:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+}
+
+export { handleUpload, handleGetDocuments, handleDeleteDocument, handleGetDocumentUrl };

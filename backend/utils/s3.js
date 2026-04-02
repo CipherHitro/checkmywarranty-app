@@ -1,6 +1,7 @@
 // utils/s3.js
 import { v4 as uuidv4 } from 'uuid';
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { configDotenv } from 'dotenv';
 configDotenv();
 
@@ -30,4 +31,21 @@ const uploadToS3 = async (file, folder = 'uploads') => {
   return url;
 };
 
-export { uploadToS3 };
+const generateSignedUrl = async (fileUrl) => {
+  const bucketUrl = `https://${process.env.AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/`;
+  if (!fileUrl.startsWith(bucketUrl)) {
+    return fileUrl;
+  }
+
+  const key = fileUrl.replace(bucketUrl, '');
+  
+  const command = new GetObjectCommand({
+    Bucket: process.env.AWS_BUCKET_NAME,
+    Key: key,
+  });
+
+  const signedUrl = await getSignedUrl(s3, command, { expiresIn: 900 });
+  return signedUrl;
+};
+
+export { uploadToS3, generateSignedUrl };
