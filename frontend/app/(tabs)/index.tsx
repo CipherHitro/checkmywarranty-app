@@ -2,6 +2,8 @@ import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import React, { useCallback, useEffect, useState } from 'react';
+import axios from 'axios';
+
 import {
   ActivityIndicator,
   Alert,
@@ -15,6 +17,7 @@ import {
   View,
   Modal,
   Platform,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getToken } from '@/utils/auth';
@@ -23,7 +26,6 @@ const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 
 interface Document {
   uuid: string;
-  file_url: string;
   original_filename: string;
   expiry_date: string | null;
   created_at: string;
@@ -37,6 +39,8 @@ const Documents = () => {
   const [showExpiryModal, setShowExpiryModal] = useState(false);
   const [expiryDate, setExpiryDate] = useState('');
   const [pendingFile, setPendingFile] = useState<any>(null);
+  const [viewingDocument, setViewingDocument] = useState<{ url: string, filename: string } | null>(null);
+  const [viewLoading, setViewLoading] = useState(false);
 
   const fetchDocuments = useCallback(async () => {
     try {
@@ -74,7 +78,7 @@ const Documents = () => {
       const formData = new FormData();
 
       const fileUri = fileAsset.uri;
-      const fileName = fileAsset.name || fileAsset.fileName || `upload_${Date.now()}.jpg`;
+      const fileName = decodeURIComponent(fileAsset.name) || decodeURIComponent(fileAsset.fileName) || `upload_${Date.now()}.jpg`;
       const fileType = fileAsset.mimeType || 'application/octet-stream';
 
       formData.append('file', {
@@ -91,7 +95,9 @@ const Documents = () => {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
+          'Content-Type': 'multipart/form-data',
         },
+
         body: formData,
       });
 
@@ -111,6 +117,70 @@ const Documents = () => {
     }
   };
 
+  // const uploadFile = async (fileAsset: any, expiry?: string) => {
+  //   setUploading(true);
+  //   try {
+  //     const token = await getToken();
+
+  //     const fileUri = fileAsset.uri;
+  //     const fileName = fileAsset.name || fileAsset.fileName || `upload_${Date.now()}.pdf`;
+  //     const fileType = fileAsset.mimeType || 'application/octet-stream';
+
+  //     console.log('Uploading:', { fileUri, fileName, fileType }); // keep this for debugging
+
+  //     const formData = new FormData();
+  //     formData.append('file', {
+  //       uri: fileUri,
+  //       name: fileName,
+  //       type: fileType,
+  //     } as any);
+
+  //     if (expiry) {
+  //       formData.append('expiry_date', expiry);
+  //     }
+
+  //     const response = await axios.post(
+  //       `${BACKEND_URL}/manageData/upload`,
+  //       formData,
+  //       {
+  //         headers: {
+  //           Authorization: `Bearer ${token}`,
+  //           // 'Content-Type': 'multipart/form-data', // axios sets boundary correctly
+  //         },
+  //         timeout: 30000, // 30 second timeout — instead of hanging forever
+  //         onUploadProgress: (progressEvent) => {
+  //           const percent = Math.round(
+  //             (progressEvent.loaded * 100) / (progressEvent.total ?? 1)
+  //           );
+  //           console.log(`Upload progress: ${percent}%`); // helps you see where it stalls
+  //         },
+  //       }
+  //     );
+
+  //     Alert.alert('Success', 'Document uploaded successfully');
+  //     fetchDocuments();
+
+  //   } catch (error: any) {
+  //     console.error('Upload error full detail:', {
+  //       message: error.message,
+  //       code: error.code,
+  //       response: error.response?.data,  // server error if it reached the server
+  //       status: error.response?.status,
+  //     });
+
+  //     if (error.code === 'ECONNABORTED') {
+  //       Alert.alert('Upload Failed', 'Upload timed out — try on a stronger connection');
+  //     } else if (error.response) {
+  //       // Server responded with an error
+  //       Alert.alert('Upload Failed', error.response.data?.message || 'Server error');
+  //     } else {
+  //       // Never reached server
+  //       Alert.alert('Upload Failed', 'Could not reach server — check your connection');
+  //     }
+  //   } finally {
+  //     setUploading(false);
+  //   }
+  // };
   const promptExpiryAndUpload = (fileAsset: any) => {
     setPendingFile(fileAsset);
     setExpiryDate('');
@@ -200,10 +270,46 @@ const Documents = () => {
     ]);
   };
 
-  const getFileUrl = (fileUrl: string) => `${BACKEND_URL}${fileUrl}`;
+  const getFileUrl = (fileUrl: string) => {
+    if (fileUrl.startsWith('http')) return fileUrl;
+    return `${BACKEND_URL}${fileUrl}`;
+  };
 
   const isImageFile = (filename: string) =>
     /\.(jpeg|jpg|png|webp|gif)$/i.test(filename);
+
+  const handleViewDocument = async (doc: Document) => {
+    try {
+      setViewLoading(true);
+      const token = await getToken();
+      const response = await fetch(`${BACKEND_URL}/manageData/documents/${doc.uuid}/url`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        Alert.alert('Error', data.message || 'Could not fetch document URL');
+        return;
+      }
+
+      const url = getFileUrl(data.url);
+      const isImage = isImageFile(doc.original_filename);
+
+      if (isImage) {
+        setViewingDocument({ url, filename: doc.original_filename || 'Image Viewer' });
+      } else {
+        Linking.openURL(url).catch((err) => {
+          console.error('Failed to open URL:', err);
+          Alert.alert('Error', 'Could not open this document type on this device.');
+        });
+      }
+    } catch (error) {
+      console.error('View document error:', error);
+      Alert.alert('Error', 'Could not connect to server');
+    } finally {
+      setViewLoading(false);
+    }
+  };
 
   const formatDate = (dateStr: string) => {
     const d = new Date(dateStr);
@@ -215,24 +321,22 @@ const Documents = () => {
   };
 
   const renderDocumentItem = ({ item }: { item: Document }) => {
-    const isImage = isImageFile(item.original_filename || item.file_url);
+    const isImage = isImageFile(item.original_filename);
 
     return (
       <TouchableOpacity
         style={styles.documentItem}
         activeOpacity={0.7}
+        onPress={() => handleViewDocument(item)}
         onLongPress={() => deleteDocument(item.uuid)}
       >
-        {isImage ? (
-          <Image
-            source={{ uri: getFileUrl(item.file_url) }}
-            style={styles.thumbnail}
+        <View style={[styles.thumbnail, styles.filePlaceholder]}>
+          <Ionicons
+            name={isImage ? "image-outline" : "document-text-outline"}
+            size={24}
+            color="#6e6496"
           />
-        ) : (
-          <View style={[styles.thumbnail, styles.filePlaceholder]}>
-            <Ionicons name="document-text" size={24} color="#6e6496" />
-          </View>
-        )}
+        </View>
         <View style={styles.documentInfo}>
           <Text style={styles.documentName} numberOfLines={1}>
             {item.original_filename || 'Untitled Document'}
@@ -268,6 +372,32 @@ const Documents = () => {
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+      {/* Full Screen Image Viewer Modal */}
+      <Modal
+        visible={!!viewingDocument}
+        transparent={false}
+        animationType="slide"
+        onRequestClose={() => setViewingDocument(null)}
+      >
+        <SafeAreaView style={styles.viewerContainer}>
+          <View style={styles.viewerHeader}>
+            <Text style={styles.viewerTitle} numberOfLines={1}>
+              {viewingDocument?.filename}
+            </Text>
+            <TouchableOpacity onPress={() => setViewingDocument(null)} style={styles.viewerCloseButton}>
+              <Ionicons name="close" size={28} color="#ffffff" />
+            </TouchableOpacity>
+          </View>
+          {viewingDocument && (
+            <Image
+              source={{ uri: viewingDocument.url }}
+              style={styles.fullScreenImage}
+              resizeMode="contain"
+            />
+          )}
+        </SafeAreaView>
+      </Modal>
+
       {/* Expiry Date Modal */}
       <Modal
         visible={showExpiryModal}
@@ -306,6 +436,16 @@ const Documents = () => {
           </View>
         </View>
       </Modal>
+
+      {/* Loading Overlay for URL fetching */}
+      {viewLoading && (
+        <View style={styles.uploadingOverlay}>
+          <View style={styles.uploadingCard}>
+            <ActivityIndicator size="large" color="#6e6496" />
+            <Text style={styles.uploadingText}>Loading document...</Text>
+          </View>
+        </View>
+      )}
 
       {/* Upload Overlay */}
       {uploading && (
@@ -545,6 +685,39 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#333333',
+  },
+  // Viewer Modal styles
+  viewerContainer: {
+    flex: 1,
+    backgroundColor: '#000000',
+  },
+  viewerHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    zIndex: 10,
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+  },
+  viewerTitle: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
+    flex: 1,
+    marginRight: 16,
+  },
+  viewerCloseButton: {
+    padding: 4,
+  },
+  fullScreenImage: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
   },
   // Modal styles
   modalOverlay: {
