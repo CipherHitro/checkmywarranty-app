@@ -75,3 +75,34 @@ export async function handleUserLogIn(req, res) {
     return res.status(500).json({ message: "Internal server error" });
   }
 }
+
+
+export async function handleDeviceToken(req, res) {
+  console.log("inside device token", req.body)
+
+  const { token } = req.body;
+  const userId = req.user.id;
+  try {
+    const result = await pool.query(
+      `INSERT INTO device_tokens (user_id, token)
+       VALUES ($1, $2)
+       ON CONFLICT (user_id, token) DO UPDATE SET updated_at = NOW()`,
+      [userId, token]
+    );
+    return res.status(200).json({ message: "Device token saved successfully" });
+  } catch (error) {
+    console.error("Device token error:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+}
+
+export async function handleUserLogOut(req, res) {
+  const userId = req.user.id;
+  try {
+    await pool.query("DELETE FROM device_tokens WHERE user_id = $1", [userId]);
+    return res.status(200).json({ message: "Logged out successfully" });
+  } catch (error) {
+    console.error("Logout error:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+}

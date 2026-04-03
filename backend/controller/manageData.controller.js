@@ -1,6 +1,7 @@
 import { pool } from "../connection.js";
 import { uploadToS3, generateSignedUrl, getFileFromS3 } from "../utils/s3.js";
 import { encryptBuffer, decryptBuffer } from "../utils/encryption.js";
+import { reminderQueue } from "../queues/reminderQueue.js";
 import { configDotenv } from "dotenv";
 import fs from "fs";
 import path from "path";
@@ -19,7 +20,7 @@ async function handleUpload(req, res) {
     const fileSize = req.file.size;
     const fileType = req.file.mimetype;
     const expiryDate = req.body.expiry_date || null;
-    
+
     let fileUrl = null;   // used in dev only
     let s3Key = null;     // used in prod only
     let iv = null;        // encryption iv, prod only
@@ -45,13 +46,83 @@ async function handleUpload(req, res) {
         (user_id, file_url, s3_key, original_filename, file_size, file_type, 
          is_encrypted, encryption_iv, expiry_date)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-       RETURNING uuid, original_filename, file_size, file_type, expiry_date, created_at`,
+       RETURNING id, uuid, original_filename, file_size, file_type, expiry_date, created_at`,
       [userId, fileUrl, s3Key, originalFilename, fileSize, fileType, isProduction, iv, expiryDate]
     );
 
+    if (expiryDate) {
+      const reminderResult = await pool.query(
+        `INSERT INTO reminders (user_id, document_id, remind_at)
+         VALUES ($1, $2, $3)
+         RETURNING id`,
+        [userId, result.rows[0].id, expiryDate]
+      );
+
+      const reminderId = reminderResult.rows[0].id;
+
+      console.log(`[DEBUG] Raw expiryDate received: '${expiryDate}'`);
+
+      // Parse the date robustly
+      let parsedTime = new Date(expiryDate).getTime();
+
+      // If it's NaN, try a few common alternative parsings
+      if (isNaN(parsedTime) && typeof expiryDate === 'string') {
+        // Try trimming quotes if any
+        const cleaned = expiryDate.replace(/^["']|["']$/g, '');
+        parsedTime = new Date(cleaned).getTime();
+
+        if (isNaN(parsedTime)) {
+          // If the user typed DD-MM-YYYY or DD/MM/YYYY
+          const parts = cleaned.split(/[-/]/);
+          if (parts.length === 3 && parts[2].length === 4) {
+            parsedTime = new Date(`${parts[2]}-${parts[1]}-${parts[0]}`).getTime();
+          } else if (/^\d{8}$/.test(cleaned)) {
+            // Handle 8-digit numeric formats: YYYYMMDD or DDMMYYYY
+            const part1 = parseInt(cleaned.substring(0, 4), 10);
+            if (part1 > 1900 && part1 < 2100) {
+              // YYYYMMDD
+              parsedTime = new Date(`${cleaned.substring(0, 4)}-${cleaned.substring(4, 6)}-${cleaned.substring(6, 8)}`).getTime();
+            } else {
+              // DDMMYYYY
+              parsedTime = new Date(`${cleaned.substring(4, 8)}-${cleaned.substring(2, 4)}-${cleaned.substring(0, 2)}`).getTime();
+            }
+          }
+        }
+      }
+
+      const delay = parsedTime - Date.now();
+
+      console.log(`[DEBUG] Attempting to queue reminder-${reminderId} with delay: ${delay}ms`);
+
+      if (delay > 0) {
+        try {
+          const job = await reminderQueue.add('send-reminder', {
+            reminderId,
+            userId,
+            documentId: result.rows[0].id,
+            title: 'Document Expiring Soon',
+            message: `Your document '${originalFilename}' is expiring on ${expiryDate}.`
+          },
+            {
+              delay,
+              jobId: `reminder-${reminderId}`,  // unique id prevents duplicates
+              attempts: 3,              // retry 3 times if it fails
+              backoff: { type: 'exponential', delay: 5000 },
+            });
+          console.log(`[DEBUG] Successfully added job: ${job.id}`);
+        } catch (queueErr) {
+          console.error(`[DEBUG] queue.add threw error:`, queueErr);
+        }
+      } else {
+        console.log(`[DEBUG] delay <= 0, skipping queue.`);
+      }
+    }
+
+    const { id, ...documentResponse } = result.rows[0];
+
     return res.status(201).json({
       message: "File uploaded successfully",
-      document: result.rows[0],
+      document: documentResponse,
     });
   } catch (error) {
     console.error("Upload error:", error);
@@ -127,7 +198,7 @@ async function handleGetDocumentUrl(req, res) {
     // Production — fetch from S3, decrypt, stream bytes directly
     const row = result.rows[0];
     const encryptedBuffer = await getFileFromS3(row.s3_key);
-    
+
     let fileBuffer;
     if (row.is_encrypted && row.encryption_iv) {
       fileBuffer = decryptBuffer(encryptedBuffer, row.encryption_iv);

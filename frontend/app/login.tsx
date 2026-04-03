@@ -3,9 +3,63 @@ import { View, Text, StyleSheet, TextInput, TouchableOpacity, KeyboardAvoidingVi
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import * as SecureStore from 'expo-secure-store';
 import { saveToken } from '@/utils/auth';
+import * as Notifications from 'expo-notifications';
+import * as Device from 'expo-device';
+import Constants from 'expo-constants';
+
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
+const projectId =
+  Constants.expoConfig?.extra?.eas?.projectId;
+// Call this after user logs in
+const registerDeviceToken = async (authToken: string) => {
+  console.log("Starting registerDeviceToken process...");
+
+  // Only works on real device, not simulator
+  if (!Device.isDevice) {
+    console.log("Not a physical device (simulator/emulator detected). Expo push tokens require a physical device. Skipping device token registration.");
+    return;
+  }
+
+  try {
+    console.log("Requesting notification permissions...");
+    // Ask user for notification permission
+    const { status } = await Notifications.requestPermissionsAsync();
+    console.log("Notification permission status:", status);
+
+    if (status !== 'granted') {
+      console.log('Notification permission denied, returning early.');
+      return;
+    }
+
+    console.log("Fetching Expo push token... Project ID:", projectId);
+    // Get this device's unique FCM token natively
+    // const { data: deviceToken } = await Notifications.getDevicePushTokenAsync();
+    const { data: deviceToken } = await Notifications.getExpoPushTokenAsync({projectId});
+    console.log("Obtained device push token:", deviceToken);
+
+    console.log("Sending device token to backend...");
+    const response = await fetch(`${BACKEND_URL}/user/device-token`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({ token: deviceToken }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Failed to register device token. Status:', response.status, 'Error:', errorText);
+      return;
+    }
+
+    const data = await response.json();
+    console.log('Device token successfully registered with backend:', data);
+  } catch (error) {
+    console.error('Error in registerDeviceToken (network or expo-notifications issue):', error);
+  }
+};
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -33,12 +87,18 @@ export default function Login() {
       const data = await response.json();
 
       if (response.ok && data.token) {
+        console.log("Login successful. Received Auth Token. Saving to SecureStore...");
         // Store the token in Expo SecureStore
         await saveToken(data.token);
+        console.log("Auth token stored successfully. Proceeding to register device token...");
 
+        await registerDeviceToken(data.token);
+
+        console.log("Navigating to tabs...");
         // Navigate to tabs
         router.replace('/(tabs)');
       } else {
+        console.error("Login Error: Token missing or response not ok. Response data:", data);
         Alert.alert('Login Failed', data.message || 'Invalid credentials');
       }
     } catch (error) {

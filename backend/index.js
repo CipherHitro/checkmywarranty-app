@@ -6,6 +6,7 @@ import { pool } from "./connection.js";
 import { configDotenv } from "dotenv";
 import userRoutes from "./routes/user.routes.js";
 import manageDataRoutes from "./routes/manageData.routes.js";
+import './queues/reminderQueue.js';
 configDotenv();
 
 const __filename = fileURLToPath(import.meta.url);

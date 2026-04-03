@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import React, { useCallback, useEffect, useState } from 'react';
@@ -21,7 +22,7 @@ import {
   Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { getToken } from '@/utils/auth';
+import { getToken, deleteToken } from '@/utils/auth';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 
@@ -43,6 +44,7 @@ const Documents = () => {
   const [pendingFile, setPendingFile] = useState<any>(null);
   const [viewingDocument, setViewingDocument] = useState<{ url: string, filename: string, token: string } | null>(null);
   const [viewLoading, setViewLoading] = useState(false);
+  const router = useRouter();
 
   const fetchDocuments = useCallback(async () => {
     try {
@@ -224,6 +226,31 @@ const Documents = () => {
     );
     if (result.status !== 200) throw new Error('Download failed');
     return result.uri;
+  };
+
+  const handleLogout = () => {
+    Alert.alert('Logout', 'Are you sure you want to log out?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Logout',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            const token = await getToken();
+            if (token) {
+              await fetch(`${BACKEND_URL}/user/logout`, {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${token}` }
+              });
+            }
+          } catch (e) {
+            console.error("Logout backend error:", e);
+          }
+          await deleteToken();
+          router.replace('/login');
+        },
+      },
+    ]);
   };
 
   const handleViewDocument = async (doc: Document) => {
@@ -418,15 +445,23 @@ const Documents = () => {
           <Text style={styles.headerTitle}>My Documents</Text>
           <Text style={styles.subtext}>Manage your warranty documents</Text>
         </View>
-        {documents.length > 0 && (
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          {documents.length > 0 && (
+            <TouchableOpacity
+              style={styles.smallUploadButton}
+              onPress={showOptions}
+            >
+              <Ionicons name="cloud-upload-outline" size={18} color="#ffffff" />
+              <Text style={styles.smallUploadText}>Upload</Text>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity
-            style={styles.smallUploadButton}
-            onPress={showOptions}
+            style={styles.logoutButton}
+            onPress={handleLogout}
           >
-            <Ionicons name="cloud-upload-outline" size={18} color="#ffffff" />
-            <Text style={styles.smallUploadText}>Upload</Text>
+            <Ionicons name="log-out-outline" size={20} color="#e74c3c" />
           </TouchableOpacity>
-        )}
+        </View>
       </View>
 
       <View style={styles.content}>
@@ -492,6 +527,14 @@ const styles = StyleSheet.create({
   headerTextContainer: {
     flex: 1,
   },
+  logoutButton: {
+    marginLeft: 12,
+    padding: 10,
+    backgroundColor: '#ffeaea',
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   smallUploadButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -508,7 +551,7 @@ const styles = StyleSheet.create({
     marginLeft: 6,
   },
   headerTitle: {
-    fontSize: 28,
+    fontSize: 26,
     fontWeight: '700',
     color: '#333333',
   },

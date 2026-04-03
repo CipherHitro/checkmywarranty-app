@@ -27,6 +27,13 @@ CREATE TABLE documents (
         REFERENCES users(id)
         ON DELETE CASCADE
 );
+CREATE TABLE device_tokens (
+  id BIGSERIAL PRIMARY KEY,
+  user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token TEXT NOT NULL,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(user_id, token)
+);
 
 -- REMINDERS TABLE
 CREATE TABLE reminders (

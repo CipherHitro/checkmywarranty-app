@@ -1,4 +1,47 @@
-.DS_Store
-.vscode/
+# ==============================
+# General / IDEs
+# ==============================
 .idea/
-*.log
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ==============================
+# Backend (Express / Node.js)
+# ==============================
+backend/node_modules/
+backend/uploads/
+# 🚨 CRITICAL: Never push your .env file containing AWS, Firebase, and Database keys!
+backend/.env
+backend/.env.local
+backend/.env.development
+backend/.env.test
+backend/.env.production
+# Ignore temporary testing scripts
+backend/test-notification.js
+backend/test-upload.js
+backend/test-bull.js
+
+# ==============================
+# Frontend (Expo / React Native)
+# ==============================
+frontend/node_modules/
+frontend/.expo/
+frontend/dist/
+frontend/npm-debug.*
+frontend/*.jks
+frontend/*.p8
+frontend/*.p12
+frontend/*.key
+frontend/*.mobileprovision
+frontend/*.orig.*
+frontend/web-build/
+frontend/android/
+frontend/ios/
+frontend/.env
+frontend/.env.local
