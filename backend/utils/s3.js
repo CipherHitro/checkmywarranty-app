@@ -14,21 +14,33 @@ const s3 = new S3Client({
 });
 
 const uploadToS3 = async (file, folder = 'uploads') => {
-  const extension = file.originalname.split('.').pop();
-  const key = `${folder}/${uuidv4()}.${extension}`;  // e.g. receipts/abc-123.jpg
+  // const extension = file.originalname.split('.').pop();
+  const s3Key = `${folder}/${uuidv4()}.enc`; 
 
   const command = new PutObjectCommand({
     Bucket: process.env.AWS_BUCKET_NAME,
-    Key: key,
+    Key: s3Key,
     Body: file.buffer,          // this is the file in memory from multer
-    ContentType: file.mimetype, // image/jpeg, application/pdf, etc.
+    ContentType: 'application/octet-stream', // always octet-stream for encrypted files
   });
 
   await s3.send(command);
+  return s3Key; 
+};
 
-  // This is the permanent URL you save in your DB
-  const url = `https://${process.env.AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`;
-  return url;
+const getFileFromS3 = async (s3Key) => {
+  const command = new GetObjectCommand({
+    Bucket: process.env.AWS_BUCKET_NAME,
+    Key: s3Key,
+  });
+
+  const response = await s3.send(command);
+
+  const chunks = [];
+  for await (const chunk of response.Body) {
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
 };
 
 const generateSignedUrl = async (fileUrl) => {
@@ -48,4 +60,4 @@ const generateSignedUrl = async (fileUrl) => {
   return signedUrl;
 };
 
-export { uploadToS3, generateSignedUrl };
+export { uploadToS3, generateSignedUrl, getFileFromS3 };

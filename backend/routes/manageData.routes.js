@@ -21,8 +21,6 @@ else {
       const decodedName = decodeURIComponent(file.originalname);
       // Replace spaces (and other whitespace) with underscores
       const sanitizedFileURL = decodedName.replace(/\\s+/g, '_');
-      console.log(file.originalname)
-      console.log("Sanitized :", sanitizedFileURL)
 
       cb(null, `${Date.now()}-${sanitizedFileURL}`);
     },

@@ -12,10 +12,11 @@ CREATE TABLE documents (
     id BIGSERIAL PRIMARY KEY,
     uuid UUID DEFAULT gen_random_uuid() UNIQUE NOT NULL,
     user_id BIGINT NOT NULL,
-    file_url TEXT NOT NULL,
+    file_url TEXT,
     original_filename TEXT,
     file_size BIGINT,
     file_type VARCHAR(100),
+    s3_key TEXT
     is_encrypted BOOLEAN DEFAULT false,
     encryption_iv VARCHAR(64),
     expiry_date DATE,

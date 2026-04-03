@@ -2,8 +2,9 @@ import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import React, { useCallback, useEffect, useState } from 'react';
-import axios from 'axios';
-
+import * as FileSystem from 'expo-file-system/legacy';
+import * as IntentLauncher from 'expo-intent-launcher';
+import * as Sharing from 'expo-sharing';
 import {
   ActivityIndicator,
   Alert,
@@ -29,6 +30,7 @@ interface Document {
   original_filename: string;
   expiry_date: string | null;
   created_at: string;
+  file_type: string;
 }
 
 const Documents = () => {
@@ -39,7 +41,7 @@ const Documents = () => {
   const [showExpiryModal, setShowExpiryModal] = useState(false);
   const [expiryDate, setExpiryDate] = useState('');
   const [pendingFile, setPendingFile] = useState<any>(null);
-  const [viewingDocument, setViewingDocument] = useState<{ url: string, filename: string } | null>(null);
+  const [viewingDocument, setViewingDocument] = useState<{ url: string, filename: string, token: string } | null>(null);
   const [viewLoading, setViewLoading] = useState(false);
 
   const fetchDocuments = useCallback(async () => {
@@ -117,70 +119,6 @@ const Documents = () => {
     }
   };
 
-  // const uploadFile = async (fileAsset: any, expiry?: string) => {
-  //   setUploading(true);
-  //   try {
-  //     const token = await getToken();
-
-  //     const fileUri = fileAsset.uri;
-  //     const fileName = fileAsset.name || fileAsset.fileName || `upload_${Date.now()}.pdf`;
-  //     const fileType = fileAsset.mimeType || 'application/octet-stream';
-
-  //     console.log('Uploading:', { fileUri, fileName, fileType }); // keep this for debugging
-
-  //     const formData = new FormData();
-  //     formData.append('file', {
-  //       uri: fileUri,
-  //       name: fileName,
-  //       type: fileType,
-  //     } as any);
-
-  //     if (expiry) {
-  //       formData.append('expiry_date', expiry);
-  //     }
-
-  //     const response = await axios.post(
-  //       `${BACKEND_URL}/manageData/upload`,
-  //       formData,
-  //       {
-  //         headers: {
-  //           Authorization: `Bearer ${token}`,
-  //           // 'Content-Type': 'multipart/form-data', // axios sets boundary correctly
-  //         },
-  //         timeout: 30000, // 30 second timeout — instead of hanging forever
-  //         onUploadProgress: (progressEvent) => {
-  //           const percent = Math.round(
-  //             (progressEvent.loaded * 100) / (progressEvent.total ?? 1)
-  //           );
-  //           console.log(`Upload progress: ${percent}%`); // helps you see where it stalls
-  //         },
-  //       }
-  //     );
-
-  //     Alert.alert('Success', 'Document uploaded successfully');
-  //     fetchDocuments();
-
-  //   } catch (error: any) {
-  //     console.error('Upload error full detail:', {
-  //       message: error.message,
-  //       code: error.code,
-  //       response: error.response?.data,  // server error if it reached the server
-  //       status: error.response?.status,
-  //     });
-
-  //     if (error.code === 'ECONNABORTED') {
-  //       Alert.alert('Upload Failed', 'Upload timed out — try on a stronger connection');
-  //     } else if (error.response) {
-  //       // Server responded with an error
-  //       Alert.alert('Upload Failed', error.response.data?.message || 'Server error');
-  //     } else {
-  //       // Never reached server
-  //       Alert.alert('Upload Failed', 'Could not reach server — check your connection');
-  //     }
-  //   } finally {
-  //     setUploading(false);
-  //   }
-  // };
   const promptExpiryAndUpload = (fileAsset: any) => {
     setPendingFile(fileAsset);
     setExpiryDate('');
@@ -278,30 +216,48 @@ const Documents = () => {
   const isImageFile = (filename: string) =>
     /\.(jpeg|jpg|png|webp|gif)$/i.test(filename);
 
+  const downloadDocument = async (uuid: string, token: string, localPath: string) => {
+    const result = await FileSystem.downloadAsync(
+      `${BACKEND_URL}/manageData/documents/${uuid}/url`,
+      localPath,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    if (result.status !== 200) throw new Error('Download failed');
+    return result.uri;
+  };
+
   const handleViewDocument = async (doc: Document) => {
     try {
       setViewLoading(true);
       const token = await getToken();
-      const response = await fetch(`${BACKEND_URL}/manageData/documents/${doc.uuid}/url`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await response.json();
+      if (!token) throw new Error('Authentication token not found');
 
-      if (!response.ok) {
-        Alert.alert('Error', data.message || 'Could not fetch document URL');
-        return;
-      }
+      const cacheDir = FileSystem.cacheDirectory || '';
+      const localPath = `${cacheDir}${doc.uuid}_${doc.original_filename}`;
+      const cached = await FileSystem.getInfoAsync(localPath);
 
-      const url = getFileUrl(data.url);
-      const isImage = isImageFile(doc.original_filename);
+      const uri = cached.exists
+        ? localPath
+        : await downloadDocument(doc.uuid, token, localPath);
 
-      if (isImage) {
-        setViewingDocument({ url, filename: doc.original_filename || 'Image Viewer' });
-      } else {
-        Linking.openURL(url).catch((err) => {
-          console.error('Failed to open URL:', err);
-          Alert.alert('Error', 'Could not open this document type on this device.');
+      if (doc.file_type.startsWith('image/')) {
+        setViewingDocument({
+          url: uri,
+          filename: doc.original_filename,
+          token: token,
         });
+      } else if (doc.file_type === 'application/pdf') {
+
+        if (Platform.OS === 'android') {
+          const contentUri = await FileSystem.getContentUriAsync(uri);
+          await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
+            data: contentUri,
+            flags: 1,
+            type: 'application/pdf'
+          });
+        } else {
+          await Sharing.shareAsync(uri);
+        }
       }
     } catch (error) {
       console.error('View document error:', error);
